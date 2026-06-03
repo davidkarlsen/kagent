@@ -15,6 +15,7 @@ import (
 	common "github.com/kagent-dev/kagent/go/core/internal/utils"
 	"github.com/kagent-dev/kagent/go/core/pkg/auth"
 	"github.com/kagent-dev/kagent/go/core/pkg/env"
+	"github.com/kagent-dev/kagent/go/core/pkg/sandboxbackend/substrate"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/cache"
 	crcache "sigs.k8s.io/controller-runtime/pkg/cache"
@@ -24,14 +25,16 @@ import (
 )
 
 type A2ARegistrar struct {
-	cache          crcache.Cache
-	handlerMux     A2AHandlerMux
-	clientRegistry *AgentClientRegistry
-	a2aBaseURL     string
-	sandboxA2AURL  string
-	authenticator  auth.AuthProvider
-	a2aBaseOptions []a2aclient.Option
-	agentObserver  AgentObserver
+	cache                       crcache.Cache
+	handlerMux                  A2AHandlerMux
+	clientRegistry              *AgentClientRegistry
+	a2aBaseURL                  string
+	sandboxA2AURL               string
+	ateneRouterURL              string
+	authenticator               auth.AuthProvider
+	a2aBaseOptions              []a2aclient.Option
+	agentObserver               AgentObserver
+	substrateSandboxActorBackend *substrate.SandboxAgentActorBackend
 }
 
 type AgentObserver interface {
@@ -46,22 +49,26 @@ func NewA2ARegistrar(
 	clientRegistry *AgentClientRegistry,
 	a2aBaseUrl string,
 	sandboxA2ABaseURL string,
+	ateneRouterURL string,
 	authenticator auth.AuthProvider,
 	streamingMaxBuf int,
 	streamingInitialBuf int,
 	streamingTimeout time.Duration,
 	agentObserver AgentObserver,
+	substrateSandboxActorBackend *substrate.SandboxAgentActorBackend,
 ) (*A2ARegistrar, error) {
 	if clientRegistry == nil {
 		return nil, fmt.Errorf("clientRegistry must not be nil")
 	}
 	reg := &A2ARegistrar{
-		cache:          cache,
-		handlerMux:     mux,
-		clientRegistry: clientRegistry,
-		a2aBaseURL:     a2aBaseUrl,
-		sandboxA2AURL:  sandboxA2ABaseURL,
-		authenticator:  authenticator,
+		cache:                        cache,
+		handlerMux:                   mux,
+		clientRegistry:               clientRegistry,
+		a2aBaseURL:                   a2aBaseUrl,
+		sandboxA2AURL:                sandboxA2ABaseURL,
+		ateneRouterURL:               ateneRouterURL,
+		authenticator:                authenticator,
+		substrateSandboxActorBackend: substrateSandboxActorBackend,
 		a2aBaseOptions: []a2aclient.Option{
 			a2aclient.WithTimeout(streamingTimeout),
 			a2aclient.WithBuffer(streamingInitialBuf, streamingMaxBuf),
@@ -213,19 +220,32 @@ func (a *A2ARegistrar) upsertAgentHandler(ctx context.Context, agent v1alpha2.Ag
 
 	provider := resolveProviderName(ctx, a.cache, agent)
 
+	clientOpts := append([]a2aclient.Option{}, a.a2aBaseOptions...)
+	clientOpts = append(clientOpts, a2aclient.WithHTTPReqHandler(
+		&traceInjectHandler{
+			next: authimpl.A2ARequestHandler(
+				a.authenticator,
+				agentRef,
+			),
+		},
+	))
+	if sa, ok := agent.(*v1alpha2.SandboxAgent); ok &&
+		v1alpha2.AgentSandboxPlatform(&sa.Spec) == v1alpha2.SandboxPlatformSubstrate &&
+		a.substrateSandboxActorBackend != nil {
+		routerURL := a.ateneRouterURL
+		if routerURL == "" {
+			routerURL = substrate.DefaultAtenetRouterURL
+		}
+		transport, err := newSubstrateSandboxSessionRoundTripper(routerURL, sa, a.substrateSandboxActorBackend, http.DefaultTransport)
+		if err != nil {
+			return fmt.Errorf("substrate sandbox A2A transport for %s: %w", agentRef, err)
+		}
+		clientOpts = append(clientOpts, a2aclient.WithHTTPClient(&http.Client{Transport: transport}))
+	}
+
 	client, err := a2aclient.NewA2AClient(
 		card.URL,
-		append(
-			a.a2aBaseOptions,
-			a2aclient.WithHTTPReqHandler(
-				&traceInjectHandler{
-					next: authimpl.A2ARequestHandler(
-						a.authenticator,
-						agentRef,
-					),
-				},
-			),
-		)...,
+		clientOpts...,
 	)
 	if err != nil {
 		return fmt.Errorf("create A2A client for %s: %w", agentRef, err)
