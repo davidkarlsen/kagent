@@ -10,8 +10,8 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/kagent-dev/kagent/go/api/v1alpha2"
-	agent_translator "github.com/kagent-dev/kagent/go/core/internal/controller/translator/agent"
 	"github.com/kagent-dev/kagent/go/core/internal/controller/reconciler"
+	agent_translator "github.com/kagent-dev/kagent/go/core/internal/controller/translator/agent"
 	authimpl "github.com/kagent-dev/kagent/go/core/internal/httpserver/auth"
 	common "github.com/kagent-dev/kagent/go/core/internal/utils"
 	"github.com/kagent-dev/kagent/go/core/pkg/auth"
@@ -27,15 +27,15 @@ import (
 )
 
 type A2ARegistrar struct {
-	cache                       crcache.Cache
-	handlerMux                  A2AHandlerMux
-	clientRegistry              *AgentClientRegistry
-	a2aBaseURL                  string
-	sandboxA2AURL               string
-	ateneRouterURL              string
-	authenticator               auth.AuthProvider
-	a2aBaseOptions              []a2aclient.Option
-	agentObserver               AgentObserver
+	cache                        crcache.Cache
+	handlerMux                   A2AHandlerMux
+	clientRegistry               *AgentClientRegistry
+	a2aBaseURL                   string
+	sandboxA2AURL                string
+	ateneRouterURL               string
+	authenticator                auth.AuthProvider
+	a2aBaseOptions               []a2aclient.Option
+	agentObserver                AgentObserver
 	substrateSandboxActorBackend *substrate.SandboxAgentActorBackend
 }
 
